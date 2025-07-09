@@ -16,6 +16,7 @@ LinkedList<Station>* stations;
 LinkedList<AirTag>* airtags;
 LinkedList<Flipper>* flippers;
 LinkedList<IPAddress>* ipList;
+LinkedList<ProbeReqSsid>* probe_req_ssids;
 
 extern "C" int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3){
     if (arg == 31337)
@@ -548,6 +549,7 @@ void WiFiScan::RunSetup() {
   airtags = new LinkedList<AirTag>();
   flippers = new LinkedList<Flipper>();
   ipList = new LinkedList<IPAddress>();
+  probe_req_ssids = new LinkedList<ProbeReqSsid>;
   // for Pinescan
   pinescan_trackers = new LinkedList<PineScanTracker>();
   confirmed_pinescan = new LinkedList<ConfirmedPineScan>();
@@ -981,6 +983,8 @@ void WiFiScan::StartScan(uint8_t scan_mode, uint16_t color)
   }
   else if (scan_mode == WIFI_PING_SCAN)
     RunPingScan(scan_mode, color);
+  else if (scan_mode == WIFI_PORT_SCAN_ALL)
+    RunPortScanAll(scan_mode, color);
 
   this->currentScanMode = scan_mode;
 }
@@ -1147,6 +1151,7 @@ void WiFiScan::StopScan(uint8_t scan_mode)
   (currentScanMode == WIFI_SCAN_TARGET_AP_FULL) ||
   (currentScanMode == WIFI_SCAN_AP_STA) ||
   (currentScanMode == WIFI_PING_SCAN) ||
+  (currentScanMode == WIFI_PORT_SCAN_ALL) ||
   (currentScanMode == WIFI_SCAN_PWN) ||
   (currentScanMode == WIFI_SCAN_PINESCAN) ||
   (currentScanMode == WIFI_SCAN_MULTISSID) ||
@@ -1425,7 +1430,7 @@ void WiFiScan::parseBSSID(const char* bssidStr, uint8_t* bssid) {
 
 void WiFiScan::RunPingScan(uint8_t scan_mode, uint16_t color)
 {
-  startPcap("pingscan");
+  startLog("pingscan");
 
   #ifdef HAS_FLIPPER_LED
     flipper_led.sniffLED();
@@ -1466,6 +1471,81 @@ void WiFiScan::RunPingScan(uint8_t scan_mode, uint16_t color)
   Serial.println(this->subnet);
   Serial.print("MAC: ");
   Serial.println(WiFi.macAddress());
+
+  buffer_obj.append("Starting Ping Scan with...");
+  buffer_obj.append("\nSSID: " + (String)this->connected_network);
+  buffer_obj.append("\nIP address: ");
+  buffer_obj.append(this->ip_addr.toString());
+  buffer_obj.append("\nGateway: ");
+  buffer_obj.append(this->gateway.toString());
+  buffer_obj.append("\nNetmask: ");
+  buffer_obj.append(this->subnet.toString());
+  buffer_obj.append("\nMAC: ");
+  buffer_obj.append((String)WiFi.macAddress());
+  buffer_obj.append("\n");
+
+  this->scan_complete = false;
+  initTime = millis();
+}
+
+void WiFiScan::RunPortScanAll(uint8_t scan_mode, uint16_t color)
+{
+  startLog("portscan");
+
+  #ifdef HAS_FLIPPER_LED
+    flipper_led.sniffLED();
+  #elif defined(XIAO_ESP32_S3)
+    xiao_led.sniffLED();
+  #elif defined(MARAUDER_M5STICKC)
+    stickc_led.sniffLED();
+  #else
+    led_obj.setMode(MODE_SNIFF);
+  #endif
+  
+  #ifdef HAS_SCREEN
+    display_obj.TOP_FIXED_AREA_2 = 48;
+    display_obj.tteBar = true;
+    display_obj.print_delay_1 = 15;
+    display_obj.print_delay_2 = 10;
+    display_obj.initScrollValues(true);
+    display_obj.tft.setTextWrap(false);
+    display_obj.tft.setTextColor(TFT_BLACK, color);
+    #ifdef HAS_FULL_SCREEN
+      display_obj.tft.fillRect(0,16,240,16, color);
+      display_obj.tft.drawCentreString("Port Scan All",120,16,2);
+    #endif
+    #ifdef HAS_ILI9341
+      display_obj.touchToExit();
+    #endif
+    display_obj.tft.setTextColor(TFT_RED, TFT_BLACK);
+    display_obj.setupScrollArea(display_obj.TOP_FIXED_AREA_2, BOT_FIXED_AREA);
+  #endif
+
+  this->current_scan_port = 0;
+
+  Serial.println("Starting Port Scan with...");
+  Serial.print("IP address: ");
+  Serial.println(this->ip_addr);
+  Serial.print("Gateway: ");
+  Serial.println(this->gateway);
+  Serial.print("Netmask: ");
+  Serial.println(this->subnet);
+  Serial.print("MAC: ");
+  Serial.println(WiFi.macAddress());
+
+  buffer_obj.append("Starting Port Scan with...");
+  buffer_obj.append("\nSSID: " + (String)this->connected_network);
+  buffer_obj.append("\nIP address: ");
+  buffer_obj.append(this->ip_addr.toString());
+  buffer_obj.append("\nGateway: ");
+  buffer_obj.append(this->gateway.toString());
+  buffer_obj.append("\nNetmask: ");
+  buffer_obj.append(this->subnet.toString());
+  buffer_obj.append("\nMAC: ");
+  buffer_obj.append((String)WiFi.macAddress());
+  buffer_obj.append("\n");
+
+  this->scan_complete = false;
   initTime = millis();
 }
 
@@ -3273,6 +3353,8 @@ void WiFiScan::RunDeauthScan(uint8_t scan_mode, uint16_t color)
 // Function for running probe request scan
 void WiFiScan::RunProbeScan(uint8_t scan_mode, uint16_t color)
 {
+  probe_req_ssids->clear();
+
   if (scan_mode == WIFI_SCAN_PROBE)
     startPcap("probe");
   else if (scan_mode == WIFI_SCAN_STATION_WAR_DRIVE) {
@@ -3356,8 +3438,6 @@ void WiFiScan::RunSourApple(uint8_t scan_mode, uint16_t color) {
       display_obj.tft.setTextColor(TFT_GREEN, TFT_BLACK);
     #endif
 
-    this->ble_initialized;
-
     #ifdef HAS_FLIPPER_LED
       flipper_led.sniffLED();
     #elif defined(XIAO_ESP32_S3)
@@ -3402,7 +3482,6 @@ void WiFiScan::RunSwiftpairSpam(uint8_t scan_mode, uint16_t color) {
       display_obj.tft.setTextColor(TFT_GREEN, TFT_BLACK);
     #endif
 
-    this->ble_initialized;
 
     #ifdef HAS_FLIPPER_LED
       flipper_led.attackLED();
@@ -5695,6 +5774,8 @@ void WiFiScan::probeSnifferCallback(void* buf, wifi_promiscuous_pkt_type_t type)
     if ((snifferPacket->payload[0] == 0x40) && (buf == 0))
     {
       if (wifi_scan_obj.currentScanMode == WIFI_SCAN_PROBE) {
+        String probe_req_essid;
+
         delay(random(0, 10));
         Serial.print("RSSI: ");
         Serial.print(snifferPacket->rx_ctrl.rssi);
@@ -5710,9 +5791,30 @@ void WiFiScan::probeSnifferCallback(void* buf, wifi_promiscuous_pkt_type_t type)
         for (int i = 0; i < snifferPacket->payload[25]; i++)
         {
           Serial.print((char)snifferPacket->payload[26 + i]);
-          display_string.concat((char)snifferPacket->payload[26 + i]);
+          probe_req_essid.concat((char)snifferPacket->payload[26 + i]);
         }
 
+        display_string.concat(probe_req_essid);
+
+        if (probe_req_essid.length() > 0) {
+            bool essidExist = false;
+            for (int i = 0; i < probe_req_ssids->size(); i++) {
+                ProbeReqSsid cur_probe_ssid = probe_req_ssids->get(i);
+                if (cur_probe_ssid.essid == probe_req_essid) {
+                    cur_probe_ssid.requests++;
+	      	    probe_req_ssids->set(i, cur_probe_ssid);
+                    essidExist = true;
+                    break;
+                }
+            }
+            if (!essidExist) {
+				      ProbeReqSsid probeReqSsid;
+				      probeReqSsid.essid = probe_req_essid;
+              probeReqSsid.requests = 1;
+				      probeReqSsid.selected = false;
+              probe_req_ssids->add(probeReqSsid);
+            }
+        }
         // Print spaces because of the rotating lines of the hardware scroll.
         // The same characters print from previous lines so I just overwrite them
         // with spaces.
@@ -7254,19 +7356,89 @@ void WiFiScan::packetRateLoop(uint32_t tick) {
   #endif
 }
 
+bool WiFiScan::checkHostPort(IPAddress ip, uint16_t port, uint16_t timeout) {
+  WiFiClient client;
+
+  client.setTimeout(timeout);
+
+  if (client.connect(ip, port)) {
+    client.stop();
+    return true;
+  }
+
+  client.stop();
+  return false;
+}
+
 void WiFiScan::pingScan() {
+  String display_string = "";
+  String output_line = "";
   if (this->current_scan_ip != IPAddress(0, 0, 0, 0)) {
     this->current_scan_ip = getNextIP(this->current_scan_ip, this->subnet);
-    //Serial.print("Checking IP: ");
-    //Serial.println(this->current_scan_ip);
+    
+    // Check if IP is alive
     if (this->isHostAlive(this->current_scan_ip)) {
+      output_line = this->current_scan_ip.toString();
+      display_string.concat(output_line);
+      uint8_t temp_len = display_string.length();
+      for (uint8_t i = 0; i < 40 - temp_len; i++)
+      {
+        display_string.concat(" ");
+      }
       ipList->add(this->current_scan_ip);
       #ifdef HAS_SCREEN
-        display_obj.display_buffer->add(this->current_scan_ip.toString());
+        display_obj.display_buffer->add(display_string);
       #endif
-      Serial.println(this->current_scan_ip);
+      buffer_obj.append(output_line + "\n");
+      Serial.println(output_line);
     }
   }
+  else {
+    if (!this->scan_complete) {
+      this->scan_complete = true;
+      #ifdef HAS_SCREEN
+        display_obj.display_buffer->add("Scan complete");
+      #endif
+    }
+  }
+}
+
+void WiFiScan::portScan(uint8_t scan_mode) {
+  String display_string = "";
+  if (scan_mode == WIFI_PORT_SCAN_ALL) {
+    if (this->current_scan_port < MAX_PORT) {
+      this->current_scan_port = getNextPort(this->current_scan_port);
+      if (this->current_scan_port % 1000 == 0) {
+        Serial.print("Checking IP: ");
+        Serial.print(this->current_scan_ip);
+        Serial.print(" Port: ");
+        Serial.println(this->current_scan_port);
+      }
+      if (this->checkHostPort(this->current_scan_ip, this->current_scan_port, 100)) {
+        String output_line = this->current_scan_ip.toString() + ": " + (String)this->current_scan_port;
+        display_string.concat(output_line);
+        uint8_t temp_len = display_string.length();
+        for (uint8_t i = 0; i < 40 - temp_len; i++)
+        {
+          display_string.concat(" ");
+        }
+        #ifdef HAS_SCREEN
+          display_obj.display_buffer->add(display_string);
+        #endif
+        Serial.println(output_line);
+        buffer_obj.append(output_line + "\n");
+      }
+    }
+    else {
+      if (!this->scan_complete) {
+        this->scan_complete = true;
+        #ifdef HAS_SCREEN
+          display_obj.display_buffer->add("Scan complete");
+        #endif
+      }
+    }
+  }
+
 }
 
 
@@ -7294,6 +7466,9 @@ void WiFiScan::main(uint32_t currentTime)
   }
   else if (currentScanMode == WIFI_PING_SCAN) {
     this->pingScan();
+  }
+  else if (currentScanMode == WIFI_PORT_SCAN_ALL) {
+    this->portScan(WIFI_PORT_SCAN_ALL);
   }
   else if (currentScanMode == WIFI_SCAN_SIG_STREN) {
     #ifdef HAS_ILI9341
